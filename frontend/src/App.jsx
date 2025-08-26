@@ -5,7 +5,7 @@ import Login from './components/Login.jsx';
 import ProfilePage from './components/ProfilePage.jsx';
 import HomePage from './components/HomePage.jsx';
 import CreateRoomPage from './components/CreateRoomPage.jsx';
-import RoomPage from './components/RoomPage.jsx'; // <-- NEW
+import RoomPage from './components/RoomPage.jsx';
 import { Navbar, Container, Nav, Spinner } from 'react-bootstrap';
 import axios from 'axios';
 
@@ -25,6 +25,7 @@ const AppWrapper = () => {
                     const res = await axios.get('http://localhost:5000/api/profile/me', config);
                     if (res.data.currentRoomId) {
                         navigate(`/room/${res.data.currentRoomId}`);
+                        return;
                     }
                 } catch (error) {
                     // Invalid token, clear it
@@ -81,7 +82,7 @@ const AppWrapper = () => {
                         <Route path="/home" element={token ? <HomePage /> : <Navigate to="/login" />} />
                         <Route path="/create-room" element={token ? <CreateRoomPage /> : <Navigate to="/login" />} />
                         <Route path="/room/:roomId" element={token ? <RoomPage /> : <Navigate to="/login" />} />
-                        <Route path="/" element={token ? <HomePage /> : <Login />} />
+                        <Route path="/" element={token ? <Navigate to="/home" /> : <Navigate to="/login" />} />
                     </Routes>
                 </Container>
             </main>

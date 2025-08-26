@@ -19,11 +19,14 @@ const HomePage = () => {
             const token = localStorage.getItem('token');
             const config = { headers: { 'x-auth-token': token } };
             await axios.post('http://localhost:5000/api/rooms/join', { roomId: roomIdInput.toUpperCase() }, config);
+            // save for reconnect
+            localStorage.setItem('blitzcup_roomId', roomIdInput.toUpperCase());
             navigate(`/room/${roomIdInput.toUpperCase()}`);
         } catch (err) {
             setError(err.response?.data?.msg || 'Could not join room. Please check the ID.');
         }
     };
+
 
     return (
         <Container className="text-center mt-5">
@@ -42,7 +45,7 @@ const HomePage = () => {
                     </Card>
                 </Col>
                 <Col md={5}>
-                     <Card className="h-100">
+                    <Card className="h-100">
                         <Card.Body className="d-flex flex-column justify-content-between">
                             <Card.Title>Join an Existing Room</Card.Title>
                             <Card.Text>Have a room code? Enter it here to join the battle.</Card.Text>
