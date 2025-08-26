@@ -16,7 +16,7 @@ export default function RoomPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
 
-  // State management for all component data
+  // State management
   const [room, setRoom] = useState(null);
   const [user, setUser] = useState(null);
   const [currentProblem, setCurrentProblem] = useState(null);
@@ -28,15 +28,15 @@ export default function RoomPage() {
   const [chatMessages, setChatMessages] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [isContestFinished, setIsContestFinished] = useState(false);
+  // State for the countdown timer
+  const [timeLeft, setTimeLeft] = useState(null);
 
-  // Refs for managing socket connection and DOM elements
+  // Refs
   const socketRef = useRef(null);
   const mountedRef = useRef(true);
   const chatScrollRef = useRef(null);
 
   // --- Helper Functions ---
-
-  // Displays a toast notification on the screen.
   function pushNotification(msg) {
     if (!msg) return;
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -46,8 +46,15 @@ export default function RoomPage() {
     setTimeout(() => setNotifications(prev => prev.filter(t => t.id !== id)), 7000);
   }
 
-  // --- Core Component Logic (useEffect) ---
+  // Formats seconds into a user-friendly MM:SS format.
+  const formatTime = (seconds) => {
+      if (seconds === null || seconds < 0) return "00:00";
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
 
+  // --- Core Component Logic (useEffect) ---
   useEffect(() => {
     mountedRef.current = true;
     const token = localStorage.getItem("token");
@@ -57,17 +64,14 @@ export default function RoomPage() {
     }
     const headers = { "x-auth-token": token };
 
-    // Initialization function to connect and fetch data.
     async function init() {
       setLoading(true);
       try {
-        // 1. Establish socket connection immediately to prevent disconnect timeouts on refresh.
         const socket = io(SOCKET_URL, { transports: ['websocket'], auth: { token } });
         socketRef.current = socket;
 
-        // 2. Set up all socket event listeners to handle real-time updates.
+        // --- Socket Event Listeners ---
         socket.on('connect', () => {
-          console.log('Socket connected, emitting new-user to rejoin room.');
           socket.emit('new-user', { roomId });
         });
 
@@ -85,6 +89,7 @@ export default function RoomPage() {
           if (payload?.scores) setScores(payload.scores);
           setCurrentProblem(null);
           setIsContestFinished(true);
+          setTimeLeft(0);
           pushNotification('The contest has ended.');
         });
         
@@ -98,7 +103,19 @@ export default function RoomPage() {
         socket.on('problem-solved', p => pushNotification(`${p?.username} solved ${p?.problem?.name}`));
         socket.on('chat-message', m => setChatMessages(prev => [...prev, m]));
 
-        // 3. Fetch initial room and user data via REST API.
+        // Listener for the timer countdown
+        socket.on('countdown', ({ remaining }) => {
+            if (mountedRef.current) setTimeLeft(remaining);
+        });
+
+        // Listener for when time runs out
+        socket.on('time-up', () => {
+            if (mountedRef.current) {
+                setTimeLeft(0);
+                pushNotification("Time's up!");
+            }
+        });
+
         const [profileRes, roomRes] = await Promise.all([
           axios.get(`${API_BASE}/api/profile/me`, { headers }),
           axios.get(`${API_BASE}/api/rooms/details/${encodeURIComponent(roomId)}`, { headers })
@@ -106,11 +123,9 @@ export default function RoomPage() {
 
         if (!mountedRef.current) return;
 
-        // 4. Set component state from the fetched data.
         setUser(profileRes.data);
         setRoom(roomRes.data);
         
-        // Use the database as the source of truth for the contest's finished state on initial load.
         if (roomRes.data && !roomRes.data.contestIsActive) {
             setIsContestFinished(true);
         }
@@ -125,7 +140,6 @@ export default function RoomPage() {
 
     init();
 
-    // Cleanup function to disconnect socket on component unmount.
     return () => {
       mountedRef.current = false;
       if (socketRef.current) {
@@ -135,7 +149,6 @@ export default function RoomPage() {
     };
   }, [roomId, navigate]);
 
-  // Effect to auto-scroll the chat window to the latest message.
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
@@ -143,11 +156,9 @@ export default function RoomPage() {
   }, [chatMessages]);
 
   // --- Action Handlers ---
-
-  // Handles the "Verify Solution" button click.
   const handleVerify = async () => {
-    if (isContestFinished) {
-      pushNotification("Cannot verify, the contest is over.");
+    if (isContestFinished || (timeLeft !== null && timeLeft <= 0)) {
+      pushNotification("Cannot verify, the time is up or the contest is over.");
       return;
     }
     setVerifying(true);
@@ -163,22 +174,16 @@ export default function RoomPage() {
     }
   };
 
-  // Handles sending a chat message.
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!chatMessage.trim() || !user) return;
     const payload = { roomId, username: user.username, text: chatMessage.trim() };
-    
-    // Emit the message to the server; do not update state locally.
     if (socketRef.current) {
       socketRef.current.emit('chat-message', payload);
     }
-    
-    // Clear the input field.
     setChatMessage('');
   };
 
-  // Handles the "Quit Room" button click.
   const handleQuitRoom = async () => {
     const token = localStorage.getItem('token');
     try {
@@ -197,13 +202,8 @@ export default function RoomPage() {
   };
 
   // --- Render Logic ---
-
-  if (loading) {
-    return <div className="text-center mt-5"><Spinner animation="border" /></div>;
-  }
-  if (error) {
-    return <Container className="text-center mt-5"><Alert variant="danger">{error}</Alert></Container>;
-  }
+  if (loading) return <div className="text-center mt-5"><Spinner animation="border" /></div>;
+  if (error) return <Container className="text-center mt-5"><Alert variant="danger">{error}</Alert></Container>;
 
   return (
     <Container fluid className="p-3">
@@ -219,7 +219,15 @@ export default function RoomPage() {
       <Row>
         <Col md={8}>
           <Card>
-            <Card.Header as="h4">Contest Room</Card.Header>
+            <Card.Header as="h4" className="d-flex justify-content-between align-items-center">
+              <span>Contest Room</span>
+              {/* --- TIMER DISPLAY --- */}
+              {timeLeft !== null && !isContestFinished && (
+                  <Badge bg={timeLeft <= 60 ? "danger" : "info"} style={{fontSize: '1rem'}}>
+                      Time Left: {formatTime(timeLeft)}
+                  </Badge>
+              )}
+            </Card.Header>
             <Card.Body>
               {isContestFinished ? (
                 <>
@@ -236,7 +244,13 @@ export default function RoomPage() {
                   <p>Solve the problem on Codeforces and click the Verify button.</p>
                   <div className="d-grid gap-2 d-md-flex">
                     <Button variant="primary" href={currentProblem.url} target="_blank" rel="noreferrer">View on Codeforces</Button>
-                    <Button variant="success" onClick={handleVerify} disabled={verifying}>{verifying ? 'Verifying...' : 'Verify Solution'}</Button>
+                    <Button 
+                        variant="success" 
+                        onClick={handleVerify} 
+                        disabled={verifying || (timeLeft !== null && timeLeft <= 0)}
+                    >
+                        {verifying ? 'Verifying...' : 'Verify Solution'}
+                    </Button>
                   </div>
                 </>
               ) : (

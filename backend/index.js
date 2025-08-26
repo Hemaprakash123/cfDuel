@@ -5,7 +5,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
-const path = require('path');
+const fetch = require('node-fetch');
 
 // Models & routes
 const User = require('./models/User');
@@ -24,14 +24,118 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 // Expose runtime state
 const roomState = new Map();
+const roomTimer = {}; // To hold timer intervals
 app.set('io', io);
 app.set('roomState', roomState);
+
+// --- Codeforces API Helper Functions ---
+const preHandle = "https://codeforces.com/api/user.info?handles=";
+const endpointUserStats = "https://codeforces.com/api/user.status?handle=";
+const endPointProblems = "https://codeforces.com/api/problemset.problems";
+// In server.js
+const pre = "https://codeforces.com/problemset/problem/";
+
+function getRandomInt(max) {
+  return Math.floor(Math.random() * Math.floor(max));
+}
+
+async function giveRatingOfUser(handle) {
+  try {
+    const response = await fetch(preHandle + handle);
+    const jsonResponse = await response.json();
+    return jsonResponse.result[0].rating;
+  } catch (err) {
+    console.error(`Error fetching rating for ${handle}:`, err);
+    return 1200; // Default rating on error
+  }
+}
+
+async function fetchProblems(handle, solvedSet) {
+  try {
+    const response = await fetch(endpointUserStats + String(handle));
+    const temp = await response.json();
+    if (temp.status !== 'OK') return false;
+
+    temp.result.forEach((it) => {
+      if (it.verdict === "OK" && it.problem.contestId) {
+        const link = pre + it.contestId + "/" + it.problem.index;
+        solvedSet.add(link);
+      }
+    });
+    return true;
+  } catch (err) {
+    console.error(`Error fetching problems for ${handle}:`, err);
+    return false;
+  }
+}
+
+async function giveProblemNotSolvedByBoth(handles, roomDoc) {
+  const firstUserProblems = new Set();
+  const secondUserProblems = new Set();
+  
+  await fetchProblems(handles[0], firstUserProblems);
+  await fetchProblems(handles[1], secondUserProblems);
+
+  const response = await fetch(endPointProblems);
+  const jsonResponse = await response.json();
+  if (jsonResponse.status !== 'OK') {
+      throw new Error("Failed to fetch problem set from Codeforces");
+  }
+
+  const { minDifficulty, maxDifficulty } = roomDoc.settings;
+
+  const problemsNotSolved = jsonResponse.result.problems.filter((currProblem) => {
+    const link = pre + currProblem.contestId + "/" + currProblem.index;
+    return (
+      !firstUserProblems.has(link) &&
+      !secondUserProblems.has(link) &&
+      currProblem.rating >= minDifficulty &&
+      currProblem.rating <= maxDifficulty
+    );
+  });
+
+  if (problemsNotSolved.length === 0) return null; // No suitable problem found
+
+  const indx = getRandomInt(problemsNotSolved.length);
+  const chosenProblem = problemsNotSolved[indx];
+  
+  // Return a normalized problem object
+  return {
+      contestId: chosenProblem.contestId,
+      index: chosenProblem.index,
+      name: chosenProblem.name,
+      url: pre + chosenProblem.contestId + "/" + chosenProblem.index,
+      tags: chosenProblem.tags,
+      points: chosenProblem.rating 
+  };
+}
+
+function timer(minutes, roomId, eventName = 'countdown') {
+    if (roomTimer[roomId]) clearInterval(roomTimer[roomId]);
+
+    const totalSeconds = Math.max(1, Math.floor(Number(minutes) * 60));
+    let remaining = totalSeconds;
+
+    io.in(roomId).emit(eventName, { remaining });
+    io.in(roomId).emit('notification', `Timer started for ${minutes} minute(s).`);
+
+    roomTimer[roomId] = setInterval(() => {
+        remaining -= 1;
+        io.in(roomId).emit(eventName, { remaining });
+
+        if (remaining <= 0) {
+            clearInterval(roomTimer[roomId]);
+            delete roomTimer[roomId];
+            io.in(roomId).emit('time-up', { event: eventName });
+            io.in(roomId).emit('notification', 'Time is up!');
+        }
+    }, 1000);
+}
+
 
 // Synchronous helper to ensure in-memory state exists for a room
 function ensureStateForRoom(roomId, roomDoc) {
   if (!roomState.has(roomId)) {
-    const problemCount = roomDoc?.settings?.problemCount || 3;
-    const problems = []; // In a real app, you'd populate this based on settings
     roomState.set(roomId, {
       started: roomDoc ? roomDoc.currentProblem !== null : false,
       startTimer: null,
@@ -39,7 +143,7 @@ function ensureStateForRoom(roomId, roomDoc) {
       currentProblemIndex: 0,
       scores: {},
       solved: new Set(),
-      problems
+      problems: [] // This will be populated when the contest starts
     });
   }
   return roomState.get(roomId);
@@ -69,7 +173,7 @@ io.on('connection', (socket) => {
       const roomId = (payload?.roomId ?? '').toString().trim();
       if (!roomId) return socket.emit('notification', 'Join failed: missing roomId');
 
-      const roomDoc = await Room.findOne({ roomId }).populate('participants', 'username');
+      const roomDoc = await Room.findOne({ roomId }).populate('participants', 'username codeforcesUsername');
       if (!roomDoc) return socket.emit('notification', 'Error: Room not found.');
 
       const state = ensureStateForRoom(roomId, roomDoc);
@@ -109,12 +213,18 @@ io.on('connection', (socket) => {
             state.startTimer = null;
             state.started = true;
             
-            // Placeholder for your problem-picking logic
-            const prob = { contestId: 1, index: 'A', name: 'Theatre Square', url: 'https://codeforces.com/problemset/problem/1/A', points: 100 };
+            const handles = participants.map(p => p.codeforcesUsername || p.username);
+            const prob = await giveProblemNotSolvedByBoth(handles, roomDoc);
 
             if (!prob) {
-              return io.in(roomId).emit('notification', 'Could not find a suitable problem.');
+              io.in(roomId).emit('notification', 'Could not find a suitable problem with the given criteria.');
+              // Handle this case - maybe end the room or allow host to restart
+              return;
             }
+
+            // For now, let's assume we fetch one problem at a time.
+            state.problems = [prob];
+            state.currentProblemIndex = 0;
 
             roomDoc.currentProblem = prob;
             roomDoc.problemSetAt = new Date();
@@ -123,6 +233,9 @@ io.on('connection', (socket) => {
             state.currentProblem = prob;
             io.in(roomId).emit('notification', 'Contest started!');
             io.in(roomId).emit('new-problem', prob);
+            
+            // Start the timer
+            timer(roomDoc.settings.timer, roomId, 'countdown');
 
           } catch (err) {
             console.error('Contest start timer error:', err);
@@ -139,9 +252,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // --- ADDED EVENT HANDLERS ---
-
-  // Forwards chat messages to all users in the room.
+  // --- Event Handlers ---
   socket.on('chat-message', (payload) => {
     try {
       const roomId = payload?.roomId;
@@ -153,7 +264,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handles a user explicitly clicking "Quit Room".
   socket.on('leave-room', async ({ roomId }) => {
     try {
       if (!roomId) return;
@@ -172,7 +282,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handles unexpected disconnects (e.g., closing the browser tab).
   socket.on('disconnect', async () => {
     try {
       const user = await User.findOneAndUpdate({ socketId: socket.id }, { socketId: null });
@@ -185,7 +294,7 @@ io.on('connection', (socket) => {
         }
         io.in(roomId).emit('notification', `${user.username || 'A user'} disconnected.`);
       }
-    } catch (err) {
+    } catch (err){
       console.error('disconnect handler error:', err);
     }
   });
