@@ -28,7 +28,6 @@ export default function RoomPage() {
   const [chatMessages, setChatMessages] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [isContestFinished, setIsContestFinished] = useState(false);
-  // State for the countdown timer
   const [timeLeft, setTimeLeft] = useState(null);
 
   // Refs
@@ -37,6 +36,8 @@ export default function RoomPage() {
   const chatScrollRef = useRef(null);
 
   // --- Helper Functions ---
+
+  // Displays an in-app toast notification.
   function pushNotification(msg) {
     if (!msg) return;
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -44,6 +45,29 @@ export default function RoomPage() {
     setNotifications(prev => [toast, ...prev]);
     setTimeout(() => setNotifications(prev => prev.map(t => t.id === id ? { ...t, show: false } : t)), 6000);
     setTimeout(() => setNotifications(prev => prev.filter(t => t.id !== id)), 7000);
+  }
+
+  // --- NEW: Function to show a desktop notification ---
+  function showDesktopNotification(title, body) {
+    // Check if the browser supports notifications
+    if (!('Notification' in window)) {
+      console.log("This browser does not support desktop notifications.");
+      return;
+    }
+
+    // Check if permission has been granted
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body });
+    } 
+    // If permission hasn't been denied, we can ask for it.
+    else if (Notification.permission !== 'denied') {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          new Notification(title, { body });
+        }
+      });
+    }
+    // If permission is denied, we can't do anything.
   }
 
   // Formats seconds into a user-friendly MM:SS format.
@@ -55,6 +79,16 @@ export default function RoomPage() {
   };
 
   // --- Core Component Logic (useEffect) ---
+
+  // --- NEW: useEffect to request notification permission on mount ---
+  useEffect(() => {
+    // This runs once when the component mounts.
+    // If permission is 'default', it will pop up the request dialog.
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []); // Empty dependency array ensures this runs only once
+
   useEffect(() => {
     mountedRef.current = true;
     const token = localStorage.getItem("token");
@@ -100,15 +134,20 @@ export default function RoomPage() {
             pushNotification(`New problem: ${prob?.name || 'Problem'}`); 
         });
         socket.on('score-update', s => setScores(s || {}));
-        socket.on('problem-solved', p => pushNotification(`${p?.username} solved ${p?.problem?.name}`));
+        
+        // --- UPDATED: problem-solved listener ---
+        socket.on('problem-solved', (p) => {
+            const message = `${p?.username} solved "${p?.problem?.name}"`;
+            // 1. Show the in-app toast notification
+            pushNotification(message);
+            // 2. Show the desktop notification
+            showDesktopNotification('Problem Solved!', message);
+        });
+        
         socket.on('chat-message', m => setChatMessages(prev => [...prev, m]));
-
-        // Listener for the timer countdown
         socket.on('countdown', ({ remaining }) => {
             if (mountedRef.current) setTimeLeft(remaining);
         });
-
-        // Listener for when time runs out
         socket.on('time-up', () => {
             if (mountedRef.current) {
                 setTimeLeft(0);
@@ -221,7 +260,6 @@ export default function RoomPage() {
           <Card>
             <Card.Header as="h4" className="d-flex justify-content-between align-items-center">
               <span>Contest Room</span>
-              {/* --- TIMER DISPLAY --- */}
               {timeLeft !== null && !isContestFinished && (
                   <Badge bg={timeLeft <= 60 ? "danger" : "info"} style={{fontSize: '1rem'}}>
                       Time Left: {formatTime(timeLeft)}
