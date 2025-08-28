@@ -16,9 +16,10 @@ const HomePage = () => {
             return;
         }
         try {
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
             const token = localStorage.getItem('token');
             const config = { headers: { 'x-auth-token': token } };
-            await axios.post('http://localhost:5000/api/rooms/join', { roomId: roomIdInput.toUpperCase() }, config);
+            await axios.post(`${API_URL}/api/rooms/join`, { roomId: roomIdInput.toUpperCase() }, config);
             // save for reconnect
             localStorage.setItem('blitzcup_roomId', roomIdInput.toUpperCase());
             navigate(`/room/${roomIdInput.toUpperCase()}`);

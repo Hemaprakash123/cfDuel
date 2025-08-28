@@ -8,7 +8,7 @@ import {
 import { io } from "socket.io-client";
 
 // Configuration constants
-const API_BASE = "http://localhost:5000";
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 const SOCKET_URL = API_BASE;
 const LOCAL_ROOM_KEY = "blitzcup_roomId";
 

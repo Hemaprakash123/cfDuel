@@ -16,9 +16,10 @@ const CreateRoomPage = () => {
         e.preventDefault();
         setError('');
         try {
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
             const token = localStorage.getItem('token');
             const config = { headers: { 'Content-Type': 'application/json', 'x-auth-token': token } };
-            const res = await axios.post('http://localhost:5000/api/rooms/create', settings, config);
+            const res = await axios.post(`${API_URL}/api/rooms/create`, settings, config);
             // persist so refresh reconnects
             localStorage.setItem('blitzcup_roomId', res.data.roomId);
             navigate(`/room/${res.data.roomId}`);

@@ -21,8 +21,9 @@ const AppWrapper = () => {
         const checkUserStatus = async () => {
             if (token) {
                 try {
+                    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
                     const config = { headers: { 'x-auth-token': token } };
-                    const res = await axios.get('http://localhost:5000/api/profile/me', config);
+                    const res = await axios.get(`${API_URL}/api/profile/me`, config);
                     if (res.data.currentRoomId) {
                         navigate(`/room/${res.data.currentRoomId}`);
                         return;
