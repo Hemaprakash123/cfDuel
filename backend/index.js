@@ -15,7 +15,26 @@ const profileRoutes = require('./routes/profile');
 const roomRoutes = require('./routes/room');
 
 const app = express();
-app.use(cors({ origin: true }));
+const allowedOrigins = [
+    'http://localhost:5173',         // Your local frontend for development
+    'https://blitzforces.vercel.app' // Your live frontend on Vercel
+];
+
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.indexOf(origin) === -1) {
+            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+            return callback(new Error(msg), false);
+        }
+        return callback(null, true);
+    }
+};
+
+app.use(cors(corsOptions));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
