@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Container, Row, Col, Card, Button, Form, InputGroup, Alert } from 'react-bootstrap';
 import axios from 'axios';
+import About from './About.jsx';
 
 const HomePage = () => {
     const [roomIdInput, setRoomIdInput] = useState('');
@@ -37,7 +38,7 @@ const HomePage = () => {
             </Col></Row>
             <Row className="justify-content-md-center mt-4">
                 <Col md={5} className="mb-3">
-                    <Card className="h-100">
+                    <Card className="h-105">
                         <Card.Body className="d-flex flex-column justify-content-between">
                             <Card.Title>Create a New Room</Card.Title>
                             <Card.Text>Set up a new challenge, define the rules, and invite your opponent.</Card.Text>
@@ -63,6 +64,11 @@ const HomePage = () => {
                             </Form>
                         </Card.Body>
                     </Card>
+                </Col>
+            </Row>
+            <Row className="justify-content-md-center mt-5">
+                <Col md={10}>
+                    <About />
                 </Col>
             </Row>
         </Container>
