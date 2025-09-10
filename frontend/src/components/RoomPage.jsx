@@ -7,20 +7,17 @@ import {
 } from "react-bootstrap";
 import { io } from "socket.io-client";
 
-// Configuration constants
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 const SOCKET_URL = API_BASE;
-const LOCAL_ROOM_KEY = "blitzcup_roomId";
 
 export default function RoomPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
 
-  // State management
   const [room, setRoom] = useState(null);
   const [user, setUser] = useState(null);
   const [currentProblem, setCurrentProblem] = useState(null);
-  const [scores, setScores] = useState({});
+  const [scores, setScores] = useState(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [verifying, setVerifying] = useState(false);
@@ -30,67 +27,23 @@ export default function RoomPage() {
   const [isContestFinished, setIsContestFinished] = useState(false);
   const [timeLeft, setTimeLeft] = useState(null);
 
-  // Refs
   const socketRef = useRef(null);
-  const mountedRef = useRef(true);
   const chatScrollRef = useRef(null);
 
-  // --- Helper Functions ---
-
-  // Displays an in-app toast notification.
   function pushNotification(msg) {
     if (!msg) return;
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const toast = { id, msg, show: true };
-    setNotifications(prev => [toast, ...prev]);
-    setTimeout(() => setNotifications(prev => prev.map(t => t.id === id ? { ...t, show: false } : t)), 6000);
-    setTimeout(() => setNotifications(prev => prev.filter(t => t.id !== id)), 7000);
+    setNotifications(prev => [{ id, msg, show: true }, ...prev.slice(0, 4)]);
   }
 
-  // --- NEW: Function to show a desktop notification ---
-  function showDesktopNotification(title, body) {
-    // Check if the browser supports notifications
-    if (!('Notification' in window)) {
-      console.log("This browser does not support desktop notifications.");
-      return;
-    }
-
-    // Check if permission has been granted
-    if (Notification.permission === 'granted') {
-      new Notification(title, { body });
-    } 
-    // If permission hasn't been denied, we can ask for it.
-    else if (Notification.permission !== 'denied') {
-      Notification.requestPermission().then(permission => {
-        if (permission === 'granted') {
-          new Notification(title, { body });
-        }
-      });
-    }
-    // If permission is denied, we can't do anything.
-  }
-
-  // Formats seconds into a user-friendly MM:SS format.
   const formatTime = (seconds) => {
-      if (seconds === null || seconds < 0) return "00:00";
-      const mins = Math.floor(seconds / 60);
-      const secs = seconds % 60;
-      return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    if (seconds === null || seconds < 0) return "00:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  // --- Core Component Logic (useEffect) ---
-
-  // --- NEW: useEffect to request notification permission on mount ---
   useEffect(() => {
-    // This runs once when the component mounts.
-    // If permission is 'default', it will pop up the request dialog.
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []); // Empty dependency array ensures this runs only once
-
-  useEffect(() => {
-    mountedRef.current = true;
     const token = localStorage.getItem("token");
     if (!token) {
       navigate("/login");
@@ -101,89 +54,59 @@ export default function RoomPage() {
     async function init() {
       setLoading(true);
       try {
-        const socket = io(SOCKET_URL, { transports: ['websocket'], auth: { token } });
-        socketRef.current = socket;
-
-        // --- Socket Event Listeners ---
-        socket.on('connect', () => {
-          socket.emit('new-user', { roomId });
-        });
-
-        socket.on('initial-state', payload => {
-          if (!mountedRef.current) return;
-          if (payload?.scores) setScores(payload.scores);
-          if (payload?.currentProblem) {
-            setCurrentProblem(payload.currentProblem);
-            setIsContestFinished(false);
-          }
-        });
-
-        socket.on('contest-finished', payload => {
-          if (!mountedRef.current) return;
-          if (payload?.scores) setScores(payload.scores);
-          setCurrentProblem(null);
-          setIsContestFinished(true);
-          setTimeLeft(0);
-          pushNotification('The contest has ended.');
-        });
-        
-        socket.on('notification', msg => pushNotification(msg));
-        socket.on('new-problem', (prob) => { 
-            setCurrentProblem(prob); 
-            setIsContestFinished(false);
-            pushNotification(`New problem: ${prob?.name || 'Problem'}`); 
-        });
-        socket.on('score-update', s => setScores(s || {}));
-        
-        // --- UPDATED: problem-solved listener ---
-        socket.on('problem-solved', (p) => {
-            const message = `${p?.username} solved "${p?.problem?.name}"`;
-            // 1. Show the in-app toast notification
-            pushNotification(message);
-            // 2. Show the desktop notification
-            showDesktopNotification('Problem Solved!', message);
-        });
-        
-        socket.on('chat-message', m => setChatMessages(prev => [...prev, m]));
-        socket.on('countdown', ({ remaining }) => {
-            if (mountedRef.current) setTimeLeft(remaining);
-        });
-        socket.on('time-up', () => {
-            if (mountedRef.current) {
-                setTimeLeft(0);
-                pushNotification("Time's up!");
-            }
-        });
-
         const [profileRes, roomRes] = await Promise.all([
           axios.get(`${API_BASE}/api/profile/me`, { headers }),
-          axios.get(`${API_BASE}/api/rooms/details/${encodeURIComponent(roomId)}`, { headers })
+          axios.get(`${API_BASE}/api/rooms/details/${roomId}`, { headers })
         ]);
 
-        if (!mountedRef.current) return;
-
+        const roomData = roomRes.data;
         setUser(profileRes.data);
-        setRoom(roomRes.data);
-        
-        if (roomRes.data && !roomRes.data.contestIsActive) {
-            setIsContestFinished(true);
+        setRoom(roomData);
+        setChatMessages(roomData.chat || []);
+        setScores(new Map(Object.entries(roomData.scores || {})));
+
+        if (!roomData.contestIsActive) {
+          setIsContestFinished(true);
+        } else if (roomData.problems && roomData.problems.length > 0) {
+          setCurrentProblem(roomData.problems[roomData.currentProblemIndex]);
         }
+
+        // Setup socket after fetching initial data
+        const socket = io(SOCKET_URL, { auth: { token } });
+        socketRef.current = socket;
+
+        socket.on('connect', () => {
+          socket.emit('join-room', { roomId });
+        });
+
+        socket.on('notification', msg => pushNotification(msg));
+        socket.on('new-problem', prob => setCurrentProblem(prob));
+        socket.on('score-update', updatedScores => setScores(new Map(Object.entries(updatedScores || {}))));
+        socket.on('chat-message', msg => setChatMessages(prev => [...prev, msg]));
+        socket.on('contest-finished', ({ scores: finalScores }) => {
+            setIsContestFinished(true);
+            setCurrentProblem(null);
+            if (finalScores) setScores(new Map(Object.entries(finalScores)));
+        });
+        socket.on('countdown', ({ remaining }) => setTimeLeft(remaining));
+        socket.on('time-up', () => {
+            setTimeLeft(0);
+            pushNotification("Time's up!");
+        });
 
       } catch (err) {
         console.error('RoomPage init error', err);
         setError('Could not fetch room details. The room may not exist or the server is down.');
       } finally {
-        if (mountedRef.current) setLoading(false);
+        setLoading(false);
       }
     }
 
     init();
 
     return () => {
-      mountedRef.current = false;
       if (socketRef.current) {
         socketRef.current.disconnect();
-        socketRef.current = null;
       }
     };
   }, [roomId, navigate]);
@@ -194,19 +117,17 @@ export default function RoomPage() {
     }
   }, [chatMessages]);
 
-  // --- Action Handlers ---
   const handleVerify = async () => {
-    if (isContestFinished || (timeLeft !== null && timeLeft <= 0)) {
-      pushNotification("Cannot verify, the time is up or the contest is over.");
+    if (isContestFinished) {
+      pushNotification("Cannot verify, the contest is over.");
       return;
     }
     setVerifying(true);
     const token = localStorage.getItem('token');
     try {
       const res = await axios.post(`${API_BASE}/api/rooms/verify`, { roomId }, { headers: { 'x-auth-token': token } });
-      pushNotification(res.data?.msg || 'Verification requested');
+      pushNotification(res.data?.msg || 'Verification successful!');
     } catch (err) {
-      console.error('verify err', err);
       pushNotification(err?.response?.data?.msg || 'Verification failed');
     } finally {
       setVerifying(false);
@@ -215,11 +136,8 @@ export default function RoomPage() {
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!chatMessage.trim() || !user) return;
-    const payload = { roomId, username: user.username, text: chatMessage.trim() };
-    if (socketRef.current) {
-      socketRef.current.emit('chat-message', payload);
-    }
+    if (!chatMessage.trim() || !socketRef.current) return;
+    socketRef.current.emit('chat-message', { roomId, text: chatMessage.trim() });
     setChatMessage('');
   };
 
@@ -227,28 +145,22 @@ export default function RoomPage() {
     const token = localStorage.getItem('token');
     try {
       await axios.post(`${API_BASE}/api/rooms/leave`, { roomId }, { headers: { 'x-auth-token': token } });
-    } catch (err) {
-      console.warn('Server leave request failed', err?.response?.data || err.message);
-      pushNotification('Could not notify server of exit. Cleaning up locally.');
     } finally {
-      localStorage.removeItem(LOCAL_ROOM_KEY);
-      if (socketRef.current) {
-        socketRef.current.emit('leave-room', { roomId });
-        socketRef.current.disconnect();
-      }
+      if (socketRef.current) socketRef.current.disconnect();
       navigate('/home');
     }
   };
 
-  // --- Render Logic ---
   if (loading) return <div className="text-center mt-5"><Spinner animation="border" /></div>;
   if (error) return <Container className="text-center mt-5"><Alert variant="danger">{error}</Alert></Container>;
+
+  const sortedScores = Array.from(scores.entries()).sort((a, b) => b[1] - a[1]);
 
   return (
     <Container fluid className="p-3">
       <ToastContainer position="top-end" className="p-3">
         {notifications.map(t => (
-          <Toast key={t.id} onClose={() => setNotifications(prev => prev.filter(x => x.id !== t.id))} show={t.show} delay={5000} autohide>
+          <Toast key={t.id} onClose={() => setNotifications(p => p.filter(n => n.id !== t.id))} show={t.show} delay={5000} autohide>
             <Toast.Header><strong className="me-auto">Notification</strong></Toast.Header>
             <Toast.Body>{t.msg}</Toast.Body>
           </Toast>
@@ -259,7 +171,7 @@ export default function RoomPage() {
         <Col md={8}>
           <Card>
             <Card.Header as="h4" className="d-flex justify-content-between align-items-center">
-              <span>Contest Room</span>
+              <span>Contest Room: {room?.roomId}</span>
               {timeLeft !== null && !isContestFinished && (
                   <Badge bg={timeLeft <= 60 ? "danger" : "info"} style={{fontSize: '1rem'}}>
                       Time Left: {formatTime(timeLeft)}
@@ -270,7 +182,7 @@ export default function RoomPage() {
               {isContestFinished ? (
                 <>
                   <Card.Title>Contest Finished!</Card.Title>
-                  <p>Thanks for playing. Check out the final scores on the right.</p>
+                  <p>Thanks for playing. Check out the final scores.</p>
                 </>
               ) : currentProblem ? (
                 <>
@@ -279,23 +191,16 @@ export default function RoomPage() {
                     <Badge bg="secondary">{currentProblem.points}</Badge>
                   </Card.Title>
                   <div className="mb-3">{(currentProblem.tags || []).map(tag => <Badge pill bg="info" key={tag} className="me-1">{tag}</Badge>)}</div>
-                  <p>Solve the problem on Codeforces and click the Verify button.</p>
+                  <p>Solve the problem on Codeforces and click Verify.</p>
                   <div className="d-grid gap-2 d-md-flex">
-                    <Button variant="primary" href={currentProblem.url} target="_blank" rel="noreferrer">View on Codeforces</Button>
-                    <Button 
-                        variant="success" 
-                        onClick={handleVerify} 
-                        disabled={verifying || (timeLeft !== null && timeLeft <= 0)}
-                    >
+                    <Button variant="primary" href={currentProblem.url} target="_blank" rel="noreferrer">View Problem</Button>
+                    <Button variant="success" onClick={handleVerify} disabled={verifying}>
                         {verifying ? 'Verifying...' : 'Verify Solution'}
                     </Button>
                   </div>
                 </>
               ) : (
-                <>
-                  <Card.Title>Waiting for contest to start...</Card.Title>
-                  <p>The contest will begin shortly after another participant joins.</p>
-                </>
+                <Card.Title>Waiting for contest to start...</Card.Title>
               )}
             </Card.Body>
           </Card>
@@ -304,33 +209,33 @@ export default function RoomPage() {
           <Card className="mb-3">
             <Card.Header as="h5">Scoreboard</Card.Header>
             <ListGroup variant="flush">
-              {Object.keys(scores).length > 0 ? (
-                Object.entries(scores).sort((a,b) => b[1] - a[1]).map(([username, score]) => (
-                  <ListGroup.Item key={username} className="d-flex justify-content-between align-items-center">
-                    <div><strong>{username}</strong></div>
+              {sortedScores.length > 0 ? (
+                sortedScores.map(([username, score]) => (
+                  <ListGroup.Item key={username} className="d-flex justify-content-between">
+                    <strong>{username}</strong>
                     <Badge bg="primary" pill>{score}</Badge>
                   </ListGroup.Item>
                 ))
               ) : (
-                <ListGroup.Item>Waiting for scores...</ListGroup.Item>
+                <ListGroup.Item>No scores yet.</ListGroup.Item>
               )}
             </ListGroup>
           </Card>
-          <Card className="mb-3">
+          <Card>
             <Card.Header as="h5">Live Chat</Card.Header>
             <Card.Body style={{ height: '250px', overflowY: 'auto' }} ref={chatScrollRef}>
-              {chatMessages.map((m,i) => <p key={i}><strong>{m.username}:</strong> {m.text}</p>)}
+              {chatMessages.map((m, i) => <p key={i}><strong>{m.username}:</strong> {m.text}</p>)}
             </Card.Body>
             <Card.Footer>
               <Form onSubmit={handleSendMessage}>
                 <InputGroup>
-                  <Form.Control placeholder="Type a message..." value={chatMessage} onChange={(e) => setChatMessage(e.target.value)} />
+                  <Form.Control placeholder="Type..." value={chatMessage} onChange={(e) => setChatMessage(e.target.value)} />
                   <Button variant="outline-secondary" type="submit">Send</Button>
                 </InputGroup>
               </Form>
             </Card.Footer>
           </Card>
-          <div className="d-grid">
+          <div className="d-grid mt-3">
             <Button variant="danger" onClick={handleQuitRoom}>Quit Room</Button>
           </div>
         </Col>
