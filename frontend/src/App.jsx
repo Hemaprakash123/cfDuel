@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Route, Routes, Link, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import Signup from './components/Signup.jsx';
 import Login from './components/Login.jsx';
 import ProfilePage from './components/ProfilePage.jsx';
@@ -15,6 +15,7 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 const AppWrapper = () => {
     const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
+    const location = useLocation();
     const token = localStorage.getItem('token');
 
     useEffect(() => {
@@ -24,8 +25,10 @@ const AppWrapper = () => {
                     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
                     const config = { headers: { 'x-auth-token': token } };
                     const res = await axios.get(`${API_URL}/api/profile/me`, config);
-                    if (res.data.currentRoomId) {
-                        navigate(`/room/${res.data.currentRoomId}`);
+
+                    const roomPath = `/room/${res.data.currentRoomId}`;
+                    if (res.data.currentRoomId && location.pathname !== roomPath) {
+                        navigate(roomPath);
                         return;
                     }
                 } catch (error) {
@@ -37,7 +40,7 @@ const AppWrapper = () => {
             setLoading(false);
         };
         checkUserStatus();
-    }, [token, navigate]);
+    }, [token, navigate, location.pathname]);
 
     if (loading) {
         return (
