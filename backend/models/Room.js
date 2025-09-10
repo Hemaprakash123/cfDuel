@@ -9,6 +9,12 @@ const ProblemSchema = new mongoose.Schema({
   points: { type: Number }
 }, { _id: false });
 
+const ChatMessageSchema = new mongoose.Schema({
+    username: { type: String, required: true },
+    text: { type: String, required: true },
+    timestamp: { type: Date, default: Date.now }
+}, { _id: false });
+
 const RoomSchema = new mongoose.Schema({
   roomId: { type: String, required: true, unique: true },
   host: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -19,14 +25,22 @@ const RoomSchema = new mongoose.Schema({
     maxDifficulty: { type: Number, required: true },
     timer: { type: Number, required: true } // minutes
   },
-  // --- UPDATED FIELDS ---
-  // Replaces the 'status' field for better clarity.
+  problems: { type: [ProblemSchema], default: [] },
+  scores: {
+      type: Map,
+      of: Number,
+      default: {}
+  },
+  solvedProblems: {
+      type: Map,
+      of: [String],
+      default: {}
+  },
+  chat: { type: [ChatMessageSchema], default: [] },
+  currentProblemIndex: { type: Number, default: 0 },
+  contestStartTime: { type: Date },
   contestIsActive: { type: Boolean, default: true }, 
-  // Records the exact time the contest concluded.
   contestEndTime: { type: Date, default: null },   
-  // --- END UPDATED FIELDS ---
-  currentProblem: { type: ProblemSchema, default: null },
-  problemSetAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 
