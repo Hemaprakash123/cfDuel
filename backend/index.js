@@ -36,9 +36,39 @@ app.use(express.urlencoded({ extended: true }));
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-// Pass io instance to routes
+// --- Timer Management ---
+const activeTimers = new Map();
+
+const startContestTimer = (roomId, durationInMinutes, io) => {
+    if (activeTimers.has(roomId)) {
+        clearInterval(activeTimers.get(roomId));
+    }
+
+    let remaining = Math.floor(Number(durationInMinutes) * 60);
+
+    const intervalId = setInterval(() => {
+        io.to(roomId).emit('countdown', { remaining });
+        remaining--;
+
+        if (remaining < 0) {
+            clearInterval(intervalId);
+            activeTimers.delete(roomId);
+            io.to(roomId).emit('time-up');
+            Room.findOneAndUpdate({ roomId }, { contestIsActive: false, contestEndTime: new Date() }, { new: true })
+                .then(room => {
+                    if(room) io.to(roomId).emit('notification', 'Time is up! Contest has ended.');
+                })
+                .catch(err => console.error('Error ending contest after timer:', err));
+        }
+    }, 1000);
+
+    activeTimers.set(roomId, intervalId);
+};
+
+// Pass io and timer function to routes
 app.use((req, res, next) => {
     req.io = io;
+    req.startContestTimer = startContestTimer;
     next();
 });
 

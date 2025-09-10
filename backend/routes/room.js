@@ -120,8 +120,10 @@ router.post('/join', auth, async (req, res) => {
             const io = req.io;
             io.to(roomId).emit('notification', 'A second player has joined! The contest will start in 15 seconds.');
 
+            // Start the main contest timer
+            req.startContestTimer(roomId, room.settings.timer, io);
+
             setTimeout(() => {
-                // Refetch the room to be safe, though it should be in scope
                 Room.findOne({ roomId }).then(updatedRoom => {
                     if (updatedRoom) {
                         io.to(roomId).emit('new-problem', updatedRoom.problems[updatedRoom.currentProblemIndex]);
@@ -193,21 +195,23 @@ router.post('/verify', auth, async (req, res) => {
             return res.status(502).json({ msg: `Codeforces API Error: ${cfRes.data.comment}` });
         }
 
-        const isSolved = cfRes.data.result.some(s =>
+        const problemId = `${prob.contestId}-${prob.index}`;
+        const solversForCurrentProblem = new Set(room.solvedProblems.get(problemId) || []);
+
+        // --- Check our database first ---
+        if (solversForCurrentProblem.has(user.username)) {
+            return res.json({ msg: 'You have already solved this problem.' });
+        }
+
+        // --- If not solved in our DB, check Codeforces ---
+        const isSolvedOnCF = cfRes.data.result.some(s =>
             s.verdict === 'OK' &&
             s.problem.contestId === prob.contestId &&
             s.problem.index === prob.index
         );
 
-        if (!isSolved) {
+        if (!isSolvedOnCF) {
             return res.status(400).json({ msg: 'No accepted submission found for this problem.' });
-        }
-
-        const problemId = `${prob.contestId}-${prob.index}`;
-        const solversForCurrentProblem = new Set(room.solvedProblems.get(problemId) || []);
-
-        if (solversForCurrentProblem.has(user.username)) {
-            return res.json({ msg: 'You have already solved this problem.' });
         }
 
         // Add user to the list of solvers for this problem and update score
