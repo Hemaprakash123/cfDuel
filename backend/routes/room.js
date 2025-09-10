@@ -108,18 +108,28 @@ router.post('/join', auth, async (req, res) => {
             room.scores.set(user.username, 0);
         }
 
-        // If contest hasn't started and now has 2+ participants, start it.
+        let contestIsStarting = false;
         if (!room.contestStartTime && room.participants.length >= 2) {
             room.contestStartTime = new Date();
-            const io = req.app.get('io');
-            io.to(roomId).emit('notification', 'The contest will start in 10 seconds!');
-            setTimeout(() => {
-                io.to(roomId).emit('new-problem', room.problems[room.currentProblemIndex]);
-                io.to(roomId).emit('notification', 'Contest started!');
-            }, 10000);
+            contestIsStarting = true;
         }
 
         await room.save();
+
+        if (contestIsStarting) {
+            const io = req.io;
+            io.to(roomId).emit('notification', 'A second player has joined! The contest will start in 15 seconds.');
+
+            setTimeout(() => {
+                // Refetch the room to be safe, though it should be in scope
+                Room.findOne({ roomId }).then(updatedRoom => {
+                    if (updatedRoom) {
+                        io.to(roomId).emit('new-problem', updatedRoom.problems[updatedRoom.currentProblemIndex]);
+                        io.to(roomId).emit('notification', 'The contest has started!');
+                    }
+                }).catch(err => console.error("Error in contest start timeout:", err));
+            }, 15000);
+        }
         await User.findByIdAndUpdate(req.user.id, { currentRoomId: roomId });
         res.json(room);
 

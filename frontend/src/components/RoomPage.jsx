@@ -179,6 +179,13 @@ export default function RoomPage() {
               )}
             </Card.Header>
             <Card.Body>
+              <div className="d-flex justify-content-between align-items-center mb-3">
+                <span className="text-muted">Share this ID with your opponent to let them join.</span>
+                <Button variant="outline-primary" size="sm" onClick={() => navigator.clipboard.writeText(room?.roomId)}>
+                  Copy Room ID: <strong>{room?.roomId}</strong>
+                </Button>
+              </div>
+
               {isContestFinished ? (
                 <>
                   <Card.Title>Contest Finished!</Card.Title>
