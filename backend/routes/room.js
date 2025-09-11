@@ -254,14 +254,13 @@ router.post('/verify', auth, async (req, res) => {
     try {
       const roomDocForUpdate = await Room.findOne({ roomId });
       if (roomDocForUpdate) {
-        const dbScores = typeof roomDocForUpdate.scores === 'object' && roomDocForUpdate.scores ? { ...roomDocForUpdate.scores } : {};
-        dbScores[user.username] = state.scores[user.username];
-        roomDocForUpdate.scores = dbScores;
-        // DO NOT clear currentProblem here; leave it until next problem assigned or contest ends
+        roomDocForUpdate.scores.set(user.username, state.scores[user.username]);
         await roomDocForUpdate.save();
       }
     } catch (dbErr) {
       console.error('Failed to persist scores to DB for room', roomId, dbErr);
+      // This is a non-critical error, so we don't send a 500 response.
+      // The in-memory state is correct, so the contest can continue.
     }
 
     // Notify clients
