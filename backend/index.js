@@ -33,6 +33,9 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// In-memory store for room states
+app.set('roomState', new Map());
+
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 

@@ -65,6 +65,18 @@ router.post('/create', auth, async (req, res) => {
         });
 
         const room = await newRoom.save();
+
+        // Initialize in-memory state for the room
+        const roomState = req.app.get('roomState');
+        roomState.set(roomId, {
+            started: false,
+            problems,
+            currentProblemIndex: 0,
+            scores: Object.fromEntries(scores),
+            solved: new Set(),
+            nextProblemTimer: null,
+        });
+
         await User.findByIdAndUpdate(req.user.id, { currentRoomId: roomId });
         res.json(room);
 
@@ -103,9 +115,15 @@ router.post('/join', auth, async (req, res) => {
 
         const user = await User.findById(req.user.id).select('username');
 
+        const roomState = req.app.get('roomState');
+        const state = roomState.get(roomId);
+
         if (!room.participants.some(p => p.equals(req.user.id))) {
             room.participants.push(req.user.id);
             room.scores.set(user.username, 0);
+            if (state && typeof state.scores === 'object') {
+                state.scores[user.username] = 0;
+            }
         }
 
         let contestIsStarting = false;
@@ -120,14 +138,19 @@ router.post('/join', auth, async (req, res) => {
             const io = req.io;
             io.to(roomId).emit('notification', 'A second player has joined! The contest will start in 15 seconds.');
 
-            setTimeout(() => {
-                // Refetch the room to be safe, though it should be in scope
-                Room.findOne({ roomId }).then(updatedRoom => {
+            setTimeout(async () => {
+                try {
+                    const updatedRoom = await Room.findOne({ roomId });
                     if (updatedRoom) {
+                        if (state) {
+                            state.started = true;
+                        }
                         io.to(roomId).emit('new-problem', updatedRoom.problems[updatedRoom.currentProblemIndex]);
                         io.to(roomId).emit('notification', 'The contest has started!');
                     }
-                }).catch(err => console.error("Error in contest start timeout:", err));
+                } catch (err) {
+                    console.error("Error in contest start timeout:", err);
+                }
             }, 15000);
         }
         await User.findByIdAndUpdate(req.user.id, { currentRoomId: roomId });
